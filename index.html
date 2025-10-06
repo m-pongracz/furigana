@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Furigana Card Generator</title>
+    <style>
+        body {
+            width: 1080px;
+            margin: auto auto;
+        }
+
+        hr {
+            width: 100%;
+        }
+
+        @page {
+            size: A4;
+            margin: 0;
+        }
+
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+
+            body {
+                margin: 0;
+                width: fit-content;
+            }
+
+            .sheet {
+                border: none !important;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        .controls {
+            padding: 12px;
+            display: grid;
+            gap: 10px;
+        }
+
+        .btns {
+            display: flex;
+            gap: 8px;
+        }
+
+        button {
+            padding: 6px 10px;
+            cursor: pointer;
+        }
+
+        #input-rows {
+            display: grid;
+            gap: 10px;
+        }
+
+        .row {
+            background-color: #eee;
+        }
+
+        .row .fields input {
+            padding: 6px 8px;
+            font-size: 14px;
+        }
+
+        .kanji-rt {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            margin-bottom: 5px;
+        }
+
+        .rt-chip {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 6px;
+            align-items: center;
+            border: 1px solid #ccc;
+            padding: 4px 6px;
+            border-radius: 6px;
+            background-color: white;
+        }
+
+        .rt-chip .k {
+            font-weight: 600;
+        }
+
+        .rt-chip input {
+            width: 50px;
+        }
+
+        #card-container {
+            margin: 0;
+            width: fit-content;
+        }
+
+        .sheet {
+            width: 210mm;
+            height: 297mm;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(5, 1fr);
+            box-shadow:
+                0 1px 2px rgba(0, 0, 0, .05),
+                0 8px 16px rgba(0, 0, 0, .08),
+                0 24px 48px rgba(0, 0, 0, .06);
+            border: 1px solid var(#e9e5da);
+            background: #fbf9f4;
+        }
+
+        .sheet+.sheet {
+            page-break-before: always;
+            margin-top: 10px;
+        }
+
+        .card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 3mm;
+            width: 70mm;
+            height: 59.4mm;
+            text-align: center;
+        }
+
+        ruby rt {
+            font-size: 0.55em;
+            line-height: 1;
+        }
+
+        #prompt-import {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+        }
+
+        #prompt-import button {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <template id="card-template">
+        <div class="card">
+            <div class="content">
+                <div class="jap"></div>
+                <div class="eng"></div>
+            </div>
+        </div>
+    </template>
+
+    <template id="row-template">
+        <div class="row">
+            <div class="kanji-rt"></div>
+            <div class="fields">
+                <span><button type="button" class="remove-row" title="Remove">×</button></span>
+                <label>Japanese: </label><input class="japanese" placeholder="Word (kanji + kana, e.g., 読み方)" />
+                <label>English: </label><input class="eng" placeholder="english" />
+            </div>
+        </div>
+    </template>
+
+    <template id="rt-chip-template">
+        <div class="rt-chip">
+            <span class="k"></span>
+            <input class="rt" />
+        </div>
+    </template>
+
+    <div class="no-print controls">
+        <h1>Furigana Card Generator</h1>
+        <p>Define your cards by adding rows either manually, or by importing them from a file/text and then press
+            generate. After your cards are generated you can use the 'Print' button to print them.</p>
+        <hr />
+        <div>
+            <h2>CSV Import/Export</h2>
+            <button id="import-btn">Import from CSV</button>
+            <button id="export-btn">Save to CSV</button>
+            <input type="file" id="import-file" accept=".csv" style="display:none" />
+        </div>
+        <hr />
+        <div>
+            <h2>Text import</h2>
+            <p>You can use ChatGPT or similar tools to generate text that can be imported here. Just copy the prompt,
+                change the english words to your liking, copy the result to the import window and click 'Import from
+                text'.</p>
+            <div id="prompt-import">
+                <div>
+                    <p>Prompt:</p>
+                    <textarea readonly id="prompt-textarea" rows="8" cols="50"></textarea>
+                    <button id="prompt-clipboard-btn">Copy to clipboard</button>
+                </div>
+                <div>
+                    <p>Import:</p>
+                    <textarea id="import-textarea" rows="8" cols="50"></textarea>
+                    <button id="import-textarea-btn">Import from text</button>
+                </div>
+            </div>
+        </div>
+        <hr />
+        <h2>Rows</h2>
+        <div>
+            <button id="clear-rows-btn">Clear rows</button>
+        </div>
+        <div id="input-rows"></div>
+        <hr />
+        <h2>Cards</h2>
+        <div class="btns">
+            <button id="add-row-btn">＋ Add row</button>
+            <button id="render-btn">Generate</button>
+            <button id="print-btn">Print</button>
+        </div>
+    </div>
+
+    <div id="card-container"></div>
+
+    <script>
+        // ====== CENTRALIZED SELECTORS ======
+        const IDS = {
+            CARD_TEMPLATE: 'card-template',
+            ROW_TEMPLATE: 'row-template',
+            RT_CHIP_TEMPLATE: 'rt-chip-template',
+            CARD_CONTAINER: 'card-container',
+            INPUT_ROWS: 'input-rows',
+            EXPORT_BTN: 'export-btn',
+            IMPORT_BTN: 'import-btn',
+            IMPORT_FILE: 'import-file',
+            ADD_ROW_BTN: 'add-row-btn',
+            RENDER_BTN: 'render-btn',
+            CLEAR_ROWS_BTN: 'clear-rows-btn',
+            IMPORT_TEXTAREA: 'import-textarea',
+            IMPORT_TEXTAREA_BTN: 'import-textarea-btn',
+            PROMPT_TEXTAREA: 'prompt-textarea',
+            PROMPT_CLIPBOARD_BTN: 'prompt-clipboard-btn',
+            PRINT_BTN: 'print-btn',
+        };
+
+        const CLS = {
+            SHEET: 'sheet',
+            CARD: 'card',
+            CONTENT: 'content',
+            JAP: 'jap',
+            ENG: 'eng',
+            ROW: 'row',
+            KANJI_RT: 'kanji-rt',
+            FIELDS: 'fields',
+            REMOVE_ROW: 'remove-row',
+            SURFACE: 'japanese',
+            RT_CHIP: 'rt-chip',
+            K: 'k',
+            RT: 'rt',
+            BTNS: 'btns',
+            NO_PRINT: 'no-print',
+        };
+
+        // Small helpers
+        const byId = (id) => document.getElementById(id);
+        const qs = (sel, root = document) => root.querySelector(sel);
+        const qsa = (sel, root = document) => root.querySelectorAll(sel);
+
+        // ====== CONSTANTS ======
+        const COLS = 3, ROWS = 5;
+        const PER_PAGE = COLS * ROWS;
+        const CUT = '1px dashed black';
+
+        // ====== UTIL ======
+        function clearPages() {
+            byId(IDS.CARD_CONTAINER).innerHTML = '';
+        }
+
+        // --- Ruby rendering helpers ---
+        const kanjiRegex = /\p{Script=Han}/u;
+
+        // ====== Card class (centralized ctor) ======
+        // rts is now an ARRAY aligned to japanese characters; empty slots are null
+        class Card {
+            constructor(japanese = '', eng = '', rts = []) {
+                this.japanese = String(japanese ?? '');
+                this.eng = String(eng ?? '');
+
+                // Normalize rts to an array of length == japanese length with nulls
+                const len = Array.from(this.japanese).length;
+                const tmp = Array.isArray(rts) ? rts.slice() : this._fromMaybeObject(rts);
+                const arr = new Array(len).fill(null);
+                for (let i = 0; i < Math.min(len, tmp.length); i++) {
+                    const v = tmp[i];
+                    if (v === undefined || v === null) { arr[i] = null; continue; }
+                    const s = String(v).trim();
+                    arr[i] = s ? s : null;
+                }
+                this.rts = arr;
+            }
+            static from(preset = {}) {
+                return new Card(preset.japanese, preset.eng, preset.rts);
+            }
+            _fromMaybeObject(maybeObj) {
+                const res = [];
+                if (maybeObj && typeof maybeObj === 'object') {
+                    for (const [k, v] of Object.entries(maybeObj)) {
+                        const idx = Number(k);
+                        const val = (v ?? '').toString().trim();
+                        res[idx] = val ? val : null;
+                    }
+                }
+                return res;
+            }
+        }
+
+        function renderFromRows() {
+            function getSheet(pageIndex) {
+                const container = byId(IDS.CARD_CONTAINER);
+                let sheet = qs(`.${CLS.SHEET}[data-page="${pageIndex}"]`, container);
+                if (!sheet) {
+                    sheet = document.createElement('div');
+                    sheet.className = CLS.SHEET;
+                    sheet.dataset.page = String(pageIndex);
+                    container.appendChild(sheet);
+                }
+                return sheet;
+            }
+
+            function renderCardFromRow(row) {
+                function appendRubySegments(target, row) {
+                    const segments = row.rts; // array with nulls
+                    const chars = Array.from(row.japanese);
+                    for (let i = 0; i < chars.length; i++) {
+                        const r = document.createElement('ruby');
+                        const rt = segments[i] ?? '';
+                        r.innerHTML = `<rb>${chars[i]}</rb><rt>${rt}</rt>`;
+                        target.appendChild(r);
+                    }
+                }
+
+                const cardCount = qsa(`.${CLS.SHEET} .${CLS.CARD}`).length;
+                const pageIndex = Math.floor(cardCount / PER_PAGE);
+                const pos = cardCount % PER_PAGE;
+                const r = Math.floor(pos / COLS) + 1;
+                const c = (pos % COLS) + 1;
+
+                const sheet = getSheet(pageIndex);
+
+                const tpl = byId(IDS.CARD_TEMPLATE);
+                if (!tpl) throw new Error(`Missing #${IDS.CARD_TEMPLATE}`);
+                const frag = tpl.content.cloneNode(true);
+
+                const card = qs(`.${CLS.CARD}`, frag);
+                const jap = qs(`.${CLS.JAP}`, frag);
+                const eng = qs(`.${CLS.ENG}`, frag);
+
+                if (c < COLS) card.style.borderRight = CUT;
+                if (r < ROWS) card.style.borderBottom = CUT;
+
+                jap.textContent = '';
+                appendRubySegments(jap, row);
+                eng.textContent = row.eng ?? '';
+
+                sheet.appendChild(frag);
+
+                const cards = qsa(`.${CLS.CARD}`, sheet);
+                const newCard = cards[cards.length - 1];
+                requestAnimationFrame(() => autoFit(newCard));
+            }
+
+            function getRowsFromInputs() {
+                const rowEls = qsa(`#${IDS.INPUT_ROWS} .${CLS.ROW}`);
+                const rowsLocal = [];
+
+                rowEls.forEach(rowEl => {
+                    const japanese = (qs(`.${CLS.SURFACE}`, rowEl)?.value || '').trim();
+                    const eng = (qs(`.${CLS.ENG}`, rowEl)?.value || '').trim();
+
+                    const chars = Array.from(japanese);
+                    const rtsArr = new Array(chars.length).fill(null);
+                    qsa(`input.${CLS.RT}`, rowEl).forEach(inp => {
+                        const idx = Number(inp.dataset.idx);
+                        const val = (inp.value || '').trim();
+                        if (!Number.isNaN(idx) && idx >= 0 && idx < rtsArr.length) {
+                            rtsArr[idx] = val ? val : null;
+                        }
+                    });
+
+                    const hasAnyRt = rtsArr.some(v => v !== null);
+                    if (japanese || eng || hasAnyRt)
+                        rowsLocal.push(new Card(japanese, eng, rtsArr));
+                });
+
+                return rowsLocal;
+            }
+
+            rows = getRowsFromInputs();
+            clearPages();
+            rows.forEach(r => renderCardFromRow(r));
+        }
+
+        function addInputRow(preset = new Card(), focusInput) {
+            function updateKanjiRtInputs(rowEl) {
+                const japanese = qs(`.${CLS.SURFACE}`, rowEl)?.value ?? '';
+                const chars = Array.from(japanese);
+                const rtWrap = qs(`.${CLS.KANJI_RT}`, rowEl);
+                const tpl = byId(IDS.RT_CHIP_TEMPLATE);
+                if (!tpl) throw new Error(`Missing #${IDS.RT_CHIP_TEMPLATE}`);
+
+                // preserve currently typed values by index
+                const prev = new Map();
+                qsa(`input.${CLS.RT}`, rtWrap).forEach(inp => {
+                    prev.set(Number(inp.dataset.idx), inp.value);
+                });
+
+                rtWrap.innerHTML = '';
+
+                chars.forEach((ch, idx) => {
+                    if (!kanjiRegex.test(ch)) return;
+                    const frag = tpl.content.cloneNode(true);
+                    const span = qs(`.${CLS.K}`, frag);
+                    const input = qs(`.${CLS.RT}`, frag);
+                    span.textContent = ch;
+                    input.dataset.idx = idx;
+                    if (prev.has(idx)) input.value = prev.get(idx);
+                    rtWrap.appendChild(frag);
+                });
+            }
+
+            function removeRow(target) {
+                const row = target.closest(`.${CLS.ROW}`);
+                if (!!!row) return;
+                row.remove();
+                rows.splice(parseInt(row.getAttribute('data-index')), 1);
+            }
+
+            const tpl = byId(IDS.ROW_TEMPLATE);
+            if (!tpl) throw new Error(`Missing #${IDS.ROW_TEMPLATE}`);
+            const frag = tpl.content.cloneNode(true);
+            frag.children[0].setAttribute('data-index', qsa(`.${CLS.ROW}`).length);
+
+            byId(IDS.INPUT_ROWS).appendChild(frag);
+
+            const newRow = qs(`#${IDS.INPUT_ROWS} .${CLS.ROW}:last-child`);
+            const japaneseEl = qs(`.${CLS.SURFACE}`, newRow);
+            const engEl = qs(`.${CLS.ENG}`, newRow);
+            const removeBtn = qs(`.${CLS.REMOVE_ROW}`, newRow);
+
+            removeBtn.addEventListener('click', e => removeRow(e.currentTarget));
+            japaneseEl.addEventListener('input', () => updateKanjiRtInputs(newRow));
+
+            if (preset.japanese) japaneseEl.value = preset.japanese;
+            if (preset.eng) engEl.value = preset.eng;
+            updateKanjiRtInputs(newRow);
+
+            // Fill rt inputs from preset.rts (array with nulls)
+            if (Array.isArray(preset.rts)) {
+                preset.rts.forEach((v, idx) => {
+                    if (v === null || v === undefined || v === '') return;
+                    const inp = qs(`input.${CLS.RT}[data-idx="${idx}"]`, newRow);
+                    if (inp) inp.value = v;
+                });
+            }
+
+            if (focusInput) japaneseEl.focus();
+        }
+
+        function autoFit(cardEl, { min = 14, max = 140 } = {}) {
+            const content = qs(`.${CLS.CONTENT}`, cardEl);
+            const jap = qs(`.${CLS.JAP}`, content);
+            if (!content) return;
+            let lo = min, hi = max, best = min;
+
+            const fits = () =>
+                content.scrollWidth <= cardEl.clientWidth &&
+                content.scrollHeight <= cardEl.clientHeight;
+
+            while (lo <= hi) {
+                const mid = Math.floor((lo + hi) / 2);
+                jap.style.fontSize = mid + 'px';
+                jap.style.lineHeight = mid + 'px';
+                void content.offsetHeight;
+                if (fits()) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
+            }
+            jap.style.fontSize = best + 'px';
+        }
+
+        function refitAll() {
+            qsa(`.${CLS.CARD}`).forEach(card => autoFit(card));
+        }
+
+        class FileIntegration {
+            static downloadCsv(csvText, fileName) {
+                const blob = new Blob(['\ufeff' + csvText], { type: 'text/csv;charset=utf-8' });
+                FileIntegration.downloadFile(blob, fileName);
+            }
+            static downloadFile(blob, fileName) {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                URL.revokeObjectURL(a.href);
+                a.remove();
+            }
+            static readFile(e) { return e.target.files[0]; }
+            static async readTextFile(e) { return await FileIntegration.readFile(e).text(); }
+        }
+
+        class CsvIntegration {
+            static _header = ['japanese', 'english', 'kanji hiraganas'];
+            static _exportedFileName = 'cards';
+
+            // Export: emit one CSV row per Card
+            // The 3rd column lists readings only for kanji characters, in order.
+            static *getRowsFromData(data) {
+                yield CsvIntegration._header;
+                for (let row of data) {
+                    const chars = Array.from(row.japanese ?? '');
+                    const readingsForKanji = [];
+                    for (let i = 0; i < chars.length; i++) {
+                        if (kanjiRegex.test(chars[i])) {
+                            readingsForKanji.push(row.rts?.[i] ?? '');
+                        }
+                    }
+                    const res = [row.japanese ?? '', row.eng ?? ''];
+                    if (readingsForKanji.every(x => !x)) res.push('');
+                    else res.push(readingsForKanji.join(','));
+                    yield res;
+                }
+            }
+
+            static getCsv(data) {
+                const csvText = CsvTools.getCsvFromRows(CsvIntegration.getRowsFromData(data));
+                FileIntegration.downloadCsv(csvText, CsvIntegration._exportedFileName);
+            }
+
+            // Import: map comma-separated readings sequentially to kanji indexes
+            static *readCsvRows(text) {
+                for (let cells of CsvTools.parseCsv(text)) {
+                    if (cells[0] == CsvIntegration._header[0]) continue;
+                    if (!cells || cells.length === 0) continue;
+
+                    const jap = (cells[0] || '').trim();
+                    const eng = (cells[1] || '').trim();
+                    const readings = (cells[2] || '').split(',');
+                    if (readings.length === 1 && readings[0] === '') readings.length = 0;
+
+                    if (!jap && !eng && readings.every(x => !x)) continue;
+
+                    const chars = Array.from(jap);
+                    const kanjiIdxs = [];
+                    chars.forEach((c, idx) => { if (kanjiRegex.test(c)) kanjiIdxs.push(idx); });
+
+                    const rtsArr = new Array(chars.length).fill(null);
+                    for (let k = 0; k < kanjiIdxs.length && k < readings.length; k++) {
+                        const rt = (readings[k] || '').trim();
+                        if (rt) rtsArr[kanjiIdxs[k]] = rt;
+                    }
+                    yield new Card(jap, eng, rtsArr);
+                }
+            }
+        }
+
+        class CsvTools {
+            static getCsvFromRows(rows) {
+                let csv = "";
+                const toCsvRow = (fields) => fields.map(f => {
+                    const s = (f ?? '').toString();
+                    const needsQuotes = /[",\n]/.test(s);
+                    const esc = s.replace(/"/g, '""');
+                    return needsQuotes ? `"${esc}"` : esc;
+                }).join(',');
+                for (let fields of rows) { csv += toCsvRow(fields) + '\n'; }
+                return csv;
+            }
+
+            static *parseCsv(text) {
+                let row = [], cell = '', inQuotes = false;
+                for (let i = 0; i < text.length; i++) {
+                    const ch = text[i];
+                    if (ch === '"') {
+                        if (inQuotes && text[i + 1] === '"') { cell += '"'; i++; }
+                        else { inQuotes = !inQuotes; }
+                    } else if (ch === ',' && !inQuotes) {
+                        row.push(cell); cell = '';
+                    } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+                        if (ch === '\r' && text[i + 1] === '\n') i++;
+                        row.push(cell); yield row; row = []; cell = '';
+                    } else {
+                        cell += ch;
+                    }
+                }
+                if (cell.length || row.length) { row.push(cell); yield row; }
+            }
+        }
+
+        // ====== Initial data as Card instances with rts as arrays (nulls for gaps) ======
+        let rows = [
+            new Card('エアコンディショナー', 'air conditioner', []),
+            new Card('冷蔵庫', 'fridge', ['れい', 'ぞう', 'こ']),
+            new Card('冷凍庫', 'freezer', ['れい', 'とう', 'こ']),
+            new Card('鏡', 'mirror', ['かがみ']),
+            new Card('窓', 'window', ['まど']),
+            new Card('電子レンジ', 'microwave oven', ['でん', 'し']),
+            new Card('食器洗い機', 'dishwasher', ['しょっ', 'き', 'あら', 'い', 'き']),
+            new Card('電気スタンド', 'desk lamp', ['でん', 'き']),
+            new Card('加湿器', 'humidifier', ['か', 'しつ', 'き']),
+        ];
+
+        function renderRows() {
+            byId(IDS.INPUT_ROWS).innerHTML = '';
+            for (let example of rows) addInputRow(example, false);
+        }
+
+        async function onImportFile(e) {
+            const text = await FileIntegration.readTextFile(e);
+            importFromText(text);
+            byId(IDS.IMPORT_FILE).value = '';
+            renderRows();
+        }
+
+        async function importFromText(text) {
+            for (let row of CsvIntegration.readCsvRows(text)) rows.push(row);
+            renderRows();
+        }
+
+        function fallbackCopyToClipboard(textArea) {
+            textArea.focus();
+            textArea.select();
+
+            try {
+                var successful = document.execCommand('copy');
+                var msg = successful ? 'successful' : 'unsuccessful';
+            } catch (err) {
+                console.error('Fallback: Oops, unable to copy', err);
+            }
+        }
+
+        function copyToClipboard(textArea) {
+            if (!navigator.clipboard) {
+                fallbackCopyToClipboard(text);
+                return;
+            }
+            const text = textArea.value;
+            navigator.clipboard.writeText(text).then(function () {
+            }, function (err) {
+                console.error('Async: Could not copy text: ', err);
+            });
+        }
+
+        function clearInputRows() {
+            rows = [];
+            byId(IDS.INPUT_ROWS).innerHTML = '';
+        }
+
+        function setImportTextareaPlaceholder() {
+            const placeholder = CsvTools.getCsvFromRows(CsvIntegration.getRowsFromData(rows));;
+            byId(IDS.IMPORT_TEXTAREA).placeholder = placeholder;
+        }
+
+        function setPromptTextareaContent() {
+            const example = CsvTools.getCsvFromRows(CsvIntegration.getRowsFromData(rows));
+            const englishWords = rows.map(r => r.eng);
+
+            const value = `I will give you a list of english words and you will give me japanese translations. If there are kanji give me their hiragana transcription. Output in this format: \n\n${example} \n\nwords to translate: ${englishWords.join(", ")}`;
+
+            byId(IDS.PROMPT_TEXTAREA).value = value;
+        }
+
+        setImportTextareaPlaceholder();
+        setPromptTextareaContent();
+
+        function copyPromptToClipboard() {
+            copyToClipboard(byId(IDS.PROMPT_TEXTAREA));
+        }
+
+        function importFromTextArea() {
+            const text = byId(IDS.IMPORT_TEXTAREA).value;
+            importFromText(text);
+        }
+
+        // ====== WIRING ======
+        byId(IDS.ADD_ROW_BTN).addEventListener('click', () => addInputRow(undefined, true));
+        byId(IDS.RENDER_BTN).addEventListener('click', renderFromRows);
+        byId(IDS.EXPORT_BTN).addEventListener('click', () => CsvIntegration.getCsv(rows));
+        byId(IDS.CLEAR_ROWS_BTN).addEventListener('click', clearInputRows);
+        byId(IDS.PROMPT_CLIPBOARD_BTN).addEventListener('click', copyPromptToClipboard);
+        byId(IDS.PRINT_BTN).addEventListener('click', () => window.print());
+        byId(IDS.IMPORT_TEXTAREA_BTN).addEventListener('click', importFromTextArea);
+
+        const importBtn = byId(IDS.IMPORT_BTN);
+        const importFile = byId(IDS.IMPORT_FILE);
+        importBtn.addEventListener('click', () => importFile.click());
+        importFile.addEventListener('change', onImportFile);
+
+        renderRows();
+
+        window.addEventListener('resize', refitAll);
+        window.addEventListener('beforeprint', refitAll);
+    </script>
+</body>
+
+</html>
